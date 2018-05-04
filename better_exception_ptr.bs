@@ -1,0 +1,242 @@
+<pre class='metadata'>
+Title: How to catch an exception_ptr without even try-ing
+Shortname: P1066
+URL: wg21.link/P1066
+Revision: 0-PRE
+Audience: EWG,LEWG
+Status: D
+Group: WG21
+!CurrentVersion: <a href="https://api.csswg.org/bikeshed/?url=https://raw.githubusercontent.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.bs">Click here</a>
+!Source: <a href="https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.bs">No real reason to click here</a>
+No Abstract: no
+Markup Shorthands: markdown yes
+Markup Shorthands: biblio yes
+Editor: Mathias Stearn, MongoDB, redbeard0531+isocpp@gmail.com
+Abstract: Adding facilities to inspect and handle std::exception_ptr without throwing and catching. This mechanism should work even in environments that use -fno-exceptions.
+</pre>
+
+# Introduction
+
+`std::exception_ptr` is a weird beast. Unlike the other `_ptr` types it is completely type erased,
+similar to a hypothetical `std::any_ptr`. Presumably because of this it is the only `_ptr` type to
+offer no `get()` method, since it wouldn't know what type to return.
+
+This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
+exception in a type-safe manner. On standard libraries that implement `std::make_exception_ptr` by
+direct construction rather than `try`/`catch`/`current_exeption()` (currently MS-STL and libstdc++,
+but not libc++), it should now be possible to both create and consume a `std::exception_ptr` with
+full fidelity even with exceptions disabled. This should ease interoperability between codebases and
+libraries that choose to use exceptions and those that do not. 
+
+I have a proof of implementability without ABI breakage
+[here](https://github.com/RedBeard0531/better_exception_ptr/). It is an implementation of the
+proposed methods for both MSVC and libstdc++. I haven't tested on libc++ or with the special ARM EH
+ABI, but based on my reading of those implementations, the same strategy should work fine. Pull
+requests welcome!
+
+# Proposal
+
+This is an informal descriptions of the methods I propose adding to `std::exception_ptr`. I don't have
+fully fleshed out proposed wording yet.
+
+All pointers returned by this API are valid until this `exception_ptr` is destroyed or assigned
+over. Copying or moving the `exception_ptr` will not extend the validity of the pointers.
+
+## High-level API
+
+### <dfn>handle()<dfn>
+```cpp
+template <typename Handlers>
+/*see below*/ handle(Handlers&&... handlers) const;
+bool handle() const { return false; }
+```
+
+This API is inspired by
+[folly::exception_wrapper](https://github.com/facebook/folly/blob/0a5110143325a4db5a0a7de98531a46064731fb7/folly/ExceptionWrapper.h#L569-L606).
+
+Handles the contained exception as if there were a sequence of `catch` blocks that catch the
+argument type of each handler. The argument type is determined in a similar way to the
+`function(Handler)::argument` template deduction guide but that allows `R(...)` callable as the
+natural analog of the `catch(...)` catch-all.
+
+Return type is the natural meaning of combining the return types from all handers and making it
+optional to express nothing being caught. More formally:
+```cpp
+using CommonReturnType = common_type_t<result_of_t<Handlers>...>;
+using ReturnType = conditional_t<is_void_v<CommonReturnType>, 
+                                 bool,
+                                 optional<CommonReturnType>>;
+```
+
+If none of the handlers matched the contained exception type, returns  either `false` or a empty
+`optional`. If any handler matches returns either `true` or an `optional` constructed from its
+return value.
+
+### <dfn>handle_or_terminate()<dfn>
+```cpp
+template <typename Handlers>
+common_type_t<result_of_t<Handlers>...>
+handle_or_terminate(Handlers&&... handlers) const;
+```
+
+Similar to [=handle()=], but calls [=terminate_with_active()=] if no handler matches the current
+exception. Unwraps the return type since if it returns, a handler must have matched.
+
+### <dfn>try_catch()<dfn>
+```cpp
+template <typename T> requires is_reference_v<T>
+add_pointer_t<T> try_catch() const;
+
+template <typename T> requires is_pointer_v<T>
+optional<T> try_catch() const;
+```
+
+If the contained exception is catchable
+
+### <dfn>terminate_with_active()<dfn>
+```cpp
+[[noreturn]] void terminate_with_active() const noexcept;
+```
+
+Equivalent to: 
+
+```cpp
+try {
+    rethrow_exception(*this);
+} catch (...) {
+    std::terminate();
+}
+```
+
+Invokes the terminate handler with the contained exception active to allow it to provide useful
+information for debugging.
+
+## Low-level API
+
+This is the low-level API that is intended for library authors building their own high-level API,
+rather than direct use by end users.
+
+### <dfn>type()</dfn>
+```cpp
+type_info* type() const;
+```
+
+Returns the `type_info` corresponding to the exception held by this `exception_ptr`.
+
+### <dfn>get_raw_ptr()</dfn>
+```cpp
+void* get_raw_ptr() const;
+```
+
+Returns the address of the exception held by this `exception_ptr`. It is a pointer to the type
+described by [=type()=], so you will need to cast it to something compatible in order to use this.
+
+
+# Use Cases
+
+## Lippincott Functions
+ 
+Here is a lightly-modified example from our code base:
+
+<table>
+  <thead>
+  <tr>
+    <th> Now
+    <th> With this proposal
+
+
+  <tbody>
+  <tr>
+    <td>
+```cpp
+Status exceptionToStatus() noexcept {
+  try {
+    throw;
+  } catch (const DBException& ex) {
+    return ex.toStatus();
+  } catch (const std::exception& ex) {
+    return Status(ErrorCodes::UnknownError,
+                  ex.what());
+  } catch (...) {
+    std::terminate();
+  }
+}
+```
+    <td>
+```cpp
+Status exceptionToStatus() noexcept {
+  return std::current_exeption().handle_or_terminate(
+    [] (const DBException& ex) {
+        return ex.toStatus();
+    },
+    [] (const std::exception& ex) {
+      return Status(ErrorCodes::UnknownError,
+                    ex.what());
+    });
+}
+```
+  <tr>
+    <td> <center> 1892ns
+    <td> <center> 18ns
+</table>
+
+## Terminate Handlers
+
+It is common practice to use terminate handlers to provide useful debugging information about the
+failure. libstdc++ has a default handler that prints the type of the thrown exception using it's
+privileged access to the EH internals. Unfortunately there is no way to do that in the general case
+if you supply your own terminate handler. [=type()=] makes that information available from
+`current_exception` in a portable way.
+
+## `std::expected` and Similar Types
+
+These types become more useful with the ability to interact with the exception directly without
+rethrowing.
+
+## Error Handling in Futures
+
+# It sounds like you just want faster exception handling. Why isn't this just a QoI issue?
+
+It has been 30 years since C++98 was finalized. Compilers seem to actively avoid optimizing
+for speed in codepaths that involve throwing, which is usually a good choice. Even in trivial cases,
+they aren't able to work their usual magic. Here is an example function that should be reduced to a
+constant value of `0`, but instead goes through the full `throw`/`catch` process on all 3 major
+compilers. On my Linux desktop that means it takes 5600 cycles, when it should take none.
+
+```cpp
+int shouldBeTrivial() {
+    try {
+        throw 0;
+    } catch (int ex) {
+        return ex;
+    }
+    return 1;
+};
+```
+
+Given how universal the poor handling of exceptions is, I don't see much hope for improvement to the
+extent proposed here in the realistic, non-trivial cases.
+
+# Related Future Work
+
+## Support dynamic `dynamic_cast` using `type_info`
+
+My initial implementation plan called for adding casting facilities to `type_info` and building the
+catch logic on top of that. Since it ended up being the wrong route for MSVC ABI, I abandoned that
+plan, but it still provides useful independent functionality. Something like adding the following
+methods on `type_info`:
+
+```cpp
+template <typename T>
+bool convertable_to()
+
+template <typename T>
+T* dynamic_dynamic_cast(void* ptr);
+```
+
+## `dynamic_any_cast`
+
+Currently `any` only supports exact-match casting. Using a similarly enhanced `type_info` it should
+be able to support more flexible extractions.
+
+<!-- vim: set ft=markdown.gfm tw=100 : -->

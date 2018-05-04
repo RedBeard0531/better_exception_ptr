@@ -1,0 +1,35 @@
+BUILDDIR = build
+
+CXX = g++
+CXXFLAGS = -Wall -Wextra -Werror -std=c++17 -g -O3
+LINKFLAGS = -lbenchmark
+
+rule CXX
+  command = $CXX -o $out $CXXFLAGS  $in $LINKFLAGS -fdiagnostics-color=always -MMD -MF $out.d
+  description = CXX $out
+  depfile = $out.d
+  deps = gcc
+
+rule BS
+  command = curl https://api.csswg.org/bikeshed/ -F file=@$in -F force=1 > $out
+  description = HTML $in
+  pool = console
+
+rule RUN
+  command = $in
+  description = RUN $in
+  pool = console
+
+rule EXEC
+  command = $command
+
+build $BUILDDIR/bench: CXX bench.cpp
+default $BUILDDIR/bench
+
+build $BUILDDIR/better_exception_ptr.html: BS better_exception_ptr.bs
+default $BUILDDIR/better_exception_ptr.html
+
+build clean: EXEC
+  command = rm -r $BUILDDIR
+
+build +bench: RUN $BUILDDIR/bench
