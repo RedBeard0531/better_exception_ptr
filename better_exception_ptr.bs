@@ -6,7 +6,7 @@ Revision: 0-PRE
 Audience: EWG,LEWG
 Status: D
 Group: WG21
-!CurrentVersion: <a href="https://api.csswg.org/bikeshed/?url=https://raw.githubusercontent.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.bs">Click here</a>
+!Latest Version: <a href="https://api.csswg.org/bikeshed/?url=https://raw.githubusercontent.com/RedBeard0531/better_exception_ptr/master/better_exception_ptr.bs&force=1">Click here</a>
 !Source: <a href="https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.bs">No real reason to click here</a>
 No Abstract: no
 Markup Shorthands: markdown yes
