@@ -69,7 +69,7 @@ static void BM_today_Lippincott(benchmark::State& state) {
             try {
                 throw;
             } catch (Baz& ex) {
-                benchmark::DoNotOptimize(&ex);
+                benchmark::DoNotOptimize(ex.i);
             }
         }
     }
@@ -80,12 +80,12 @@ static void BM_EP_Lippincott(benchmark::State& state) {
     try {
         throw Baz();
     } catch (...) {
-        volatile Baz* force;
         for (auto _ : state){
-            assert(stdx::current_exception().handle([&](Baz& ex) {
-                // This ICEs g++-7.3.1: benchmark::DoNotOptimize(ex);
-                force = &ex;
-            }));
+            stdx::current_exception().handle_or_terminate(
+                [&](Baz& ex) {
+                    benchmark::DoNotOptimize(ex.i);
+                }
+            );
         }
     }
 }

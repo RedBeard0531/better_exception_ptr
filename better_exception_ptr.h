@@ -4,10 +4,9 @@
 
 #include <exception>
 
-namespace stdx {
-namespace detail {
-struct current_exception_tag {};
+namespace stdx::detail {
 
+struct current_exception_tag {};
 struct catch_all_tag {};
 
 template <typename Class>
@@ -21,34 +20,29 @@ template <typename Class, typename Ret, typename... Args>
 struct ArgumentImpl<Ret (Class::*)(Args...)> : public ArgumentImpl<Ret(Args...)> {};
 template <typename Class, typename Ret, typename... Args>
 struct ArgumentImpl<Ret (Class::*)(Args...) const> : public ArgumentImpl<Ret(Args...)> {};
-
 template <typename Ret, typename Arg>
-struct ArgumentImpl<Ret(Arg)> {
-    using type = Arg;
-};
-
+struct ArgumentImpl<Ret(Arg)> { using type = Arg; };
 template <typename Ret>
-struct ArgumentImpl<Ret(...)> {
-    using type = catch_all_tag;
-};
-
+struct ArgumentImpl<Ret(...)> { using type = catch_all_tag; };
 template <typename Ret>
-struct ArgumentImpl<Ret()> {
-    using type = void;
-};
+struct ArgumentImpl<Ret()> { using type = void; };
 
 template <typename T>
 using ArgumentOf = typename ArgumentImpl<T>::type;
 
 template <typename T, typename Argument = ArgumentOf<T>>
 struct ReturnOfImpl : public std::result_of<T(ArgumentOf<T>)> {};
-
+template <typename T>
+struct ReturnOfImpl<T, catch_all_tag> : public std::result_of<T()> {};
 template <typename T>
 struct ReturnOfImpl<T, void> : public std::result_of<T()> {};
 
 template <typename T>
 using ReturnOf = typename ReturnOfImpl<T>::type;
-}
+
+} // namespace stdx::detail
+
+namespace stdx {
 
 class exception_ptr : public std::exception_ptr {
 public:
@@ -56,12 +50,8 @@ public:
     /*implicit*/ exception_ptr(std::exception_ptr&& ex) : std::exception_ptr(std::move(ex)) {}
 
     //
-    // High level api
+    // High-level api
     //
-
-    bool handle() {
-        return false;
-    }
 
     template <
         typename Handler,
@@ -74,7 +64,15 @@ public:
         using Argument = detail::ArgumentOf<std::decay_t<Handler>>;
         static_assert(!std::is_same<Argument, detail::catch_all_tag>()); // TODO
 
-        if (auto caught = try_catch<Argument>()) {
+        if constexpr(std::is_same<Argument, detail::catch_all_tag>()) {
+            static_assert(sizeof...(Rest) == 0, "handler for (...) must be last");
+            if constexpr(std::is_void_v<CommonType>) {
+                handler();
+                return true;
+            } else {
+                return {handler()};
+            }
+        } else if (auto caught = try_catch<Argument>()) {
             if constexpr(std::is_void_v<CommonType>) {
                 handler(*caught);
                 return true;
@@ -83,25 +81,32 @@ public:
             }
         }
 
-        if constexpr(sizeof...(Rest) == 0)
-            return {};
+        if constexpr(sizeof...(Rest) == 0) {
+            return {}; // either false or nullopt.
+        }
 
         return handle(std::forward<Rest>(rest)...);
     }
 
-    [[noreturn]] void handle_or_terminate() {
-        terminate_with_active();
+    bool handle() {
+        return false;
     }
 
     template <typename Handler, typename... Rest>
     std::common_type_t<detail::ReturnOf<Handler>, detail::ReturnOf<Rest>...>
     handle_or_terminate(Handler&& handler, Rest&&... rest) {
         using Argument = detail::ArgumentOf<std::decay_t<Handler>>;
-        static_assert(!std::is_same<Argument, detail::catch_all_tag>()); // TODO
-        if (auto caught = try_catch<Argument>()) {
+        if constexpr(std::is_same<Argument, detail::catch_all_tag>()) {
+            static_assert(sizeof...(Rest) == 0, "handler for (...) must be last");
+            return handler();
+        }else if (auto caught = try_catch<Argument>()) {
             return handler(*caught);
         }
         return handle_or_terminate(std::forward<Rest>(rest)...);
+    }
+
+    [[noreturn]] void handle_or_terminate() {
+        terminate_with_active();
     }
 
     template <typename T>
@@ -112,14 +117,13 @@ public:
     try_catch() const {
         static_assert(std::is_reference_v<T> || std::is_pointer_v<T>);
 
-        using target = 
-            std::conditional_t<
-                std::is_pointer_v<T>,
-                std::optional<T>,
-                std::add_pointer_t<T>>;
-
-        if (auto raw = detail::try_catch(*this, &typeid(T)))
-            return static_cast<target>(*raw);
+        if (auto raw = detail::try_catch(*this, &typeid(T))) {
+            if constexpr(std::is_pointer_v<T>) {
+                return *static_cast<std::add_pointer_t<T>>(*raw);
+            } else {
+                return static_cast<std::add_pointer_t<T>>(*raw);
+            }
+        }
         return {};
     }
 
@@ -132,7 +136,7 @@ public:
     }
 
     //
-    // Low level api
+    // Low-level api
     //
 
     std::type_info* type() const {
@@ -143,6 +147,9 @@ public:
         return detail::get_raw_ptr(*this);
     }
 
+    // Internal detail.
+    // Avoid the overhead of copying or moving the std::exception_ptr into place.
+    // This better reflects the performance if this was added in the stdlib.
     exception_ptr(detail::current_exception_tag) : std::exception_ptr(std::current_exception()) {}
 };
 
@@ -150,5 +157,11 @@ exception_ptr current_exception() {
     return exception_ptr(detail::current_exception_tag());
 }
 
-using std::rethrow_exception;
+template <typename E>
+exception_ptr make_exception_ptr(E e) {
+    return std::make_exception_ptr(std::move(e));
 }
+
+using std::rethrow_exception;
+
+} // namespace stdx

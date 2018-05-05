@@ -18,7 +18,7 @@ Abstract: Adding facilities to inspect and handle std::exception_ptr without thr
 # Introduction
 
 `std::exception_ptr` is a weird beast. Unlike the other `_ptr` types it is completely type erased,
-similar to a hypothetical `std::any_ptr`. Presumably because of this it is the only `_ptr` type to
+similar to a hypothetical `std::any_ptr`. Presumably because of this, it is the only `_ptr` type to
 offer no `get()` method, since it wouldn't know what type to return.
 
 This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
@@ -29,18 +29,21 @@ full fidelity even with exceptions disabled. This should ease interoperability b
 libraries that choose to use exceptions and those that do not. 
 
 I have a proof of implementability without ABI breakage
-[here](https://github.com/RedBeard0531/better_exception_ptr/). It is an implementation of the
-proposed methods for both MSVC and libstdc++. I haven't tested on libc++ or with the special ARM EH
-ABI, but based on my reading of those implementations, the same strategy should work fine. Pull
-requests welcome!
+[here](https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.h). It
+is an implementation of the proposed methods for both MSVC and libstdc++. On Linux, it is **385**
+times faster than using `std::rethrow_exception` and `catch` as is needed today. I haven't tested on
+libc++ or with the special ARM EH ABI, but based on my reading of those implementations, the same
+strategy should work fine. Pull requests welcome!
 
 # Proposal
 
-This is an informal descriptions of the methods I propose adding to `std::exception_ptr`. I don't have
+This is an informal descriptions of the methods I propose adding to `exception_ptr`. I don't have
 fully fleshed out proposed wording yet.
 
 All pointers returned by this API are valid until this `exception_ptr` is destroyed or assigned
 over. Copying or moving the `exception_ptr` will not extend the validity of the pointers.
+
+Calling any of these methods on a null `exception_ptr` is UB.
 
 ## High-level API
 
@@ -51,16 +54,14 @@ template <typename Handlers>
 bool handle() const { return false; }
 ```
 
-This API is inspired by
-[folly::exception_wrapper](https://github.com/facebook/folly/blob/0a5110143325a4db5a0a7de98531a46064731fb7/folly/ExceptionWrapper.h#L569-L606).
-
 Handles the contained exception as if there were a sequence of `catch` blocks that catch the
 argument type of each handler. The argument type is determined in a similar way to the
-`function(Handler)::argument` template deduction guide but that allows `R(...)` callable as the
-natural analog of the `catch(...)` catch-all.
+`function(Handler)::argument` template deduction guide to support detecting the first and only
+argument type of a Callable object, but that allows an `R(...)` callable as the natural analog of
+the `catch(...)` catch-all. If present, the catch-all must be the last handler.
 
-Return type is the natural meaning of combining the return types from all handers and making it
-optional to express nothing being caught. More formally:
+The return type of `handle()` is the natural meaning of combining the return types from all handers
+and making it optional to express nothing being caught. More formally:
 ```cpp
 using CommonReturnType = common_type_t<result_of_t<Handlers>...>;
 using ReturnType = conditional_t<is_void_v<CommonReturnType>, 
@@ -68,9 +69,14 @@ using ReturnType = conditional_t<is_void_v<CommonReturnType>,
                                  optional<CommonReturnType>>;
 ```
 
-If none of the handlers matched the contained exception type, returns  either `false` or a empty
-`optional`. If any handler matches returns either `true` or an `optional` constructed from its
+If none of the handlers match the contained exception type, returns either `false` or an empty
+`optional`. If any handler matches, returns either `true` or an `optional` constructed from its
 return value.
+
+This API is inspired by
+[folly::exception_wrapper](https://github.com/facebook/folly/blob/0a5110143325a4db5a0a7de98531a46064731fb7/folly/ExceptionWrapper.h#L569-L606).
+It can be implemented in the standard today, albeit without the performance benefits. Additionally,
+I think the valid lifetimes of the references would be shorter than is proposed here.
 
 ### <dfn>handle_or_terminate()<dfn>
 ```cpp
@@ -91,7 +97,23 @@ template <typename T> requires is_pointer_v<T>
 optional<T> try_catch() const;
 ```
 
-If the contained exception is catchable
+If the contained exception is catchable by a `catch(T)` block, returns either a pointer to the
+exception if `T` is a reference or an `optional` containing the caught pointer if `T` is a pointer.
+If the `catch(T)` block would not catch the exception, returns `nullopt`/`nullptr`.
+
+The pointer case is a bit odd, and throwing/catching pointer is fairly rare so it could use some
+explanation for why it it both different and the same as the reference case. They have different
+return types because returning `T*` is impossible because the exception holds a `U*` and `T` may be
+`X*`, and there is no `X*` object to return a pointer to. Returning `T`/`X*` in this case would also
+be incorrect because there would be no way to distinguish a thrown null pointer from a type
+mismatch. Luckily, `optional<T>` has the same access API as `T*` so even though the return types of
+these functions are different, consumers can treat them the same:
+
+```cpp
+if (auto ex = ex_ptr.try_catch<CatchT>()) {
+    use(*ex);
+}
+```
 
 ### <dfn>terminate_with_active()<dfn>
 ```cpp
@@ -104,7 +126,7 @@ Equivalent to:
 try {
     rethrow_exception(*this);
 } catch (...) {
-    std::terminate();
+    terminate();
 }
 ```
 
@@ -136,7 +158,7 @@ described by [=type()=], so you will need to cast it to something compatible in 
 
 ## Lippincott Functions
  
-Here is a lightly-modified example from our code base:
+Here is a lightly-modified example from our code base that shows a **100x** speedup:
 
 <table>
   <thead>
@@ -195,13 +217,23 @@ rethrowing.
 
 ## Error Handling in Futures
 
+Error handling in Future chains naturally involves passing error objects into callbacks as
+arguments. There has been an active [discussion](https://github.com/executors/futures/issues/37)
+around avoiding `exception_ptr` due to these issues. In addition to the direct performance benefits
+of avoiding the unwinder, this also makes it easier to provide nicer APIs like
+`future.catch_error([](SomeExceptionType&) {})` that only invokes the user's callback when the types
+match. This has a secondary benefit of avoiding a trip through the executor's scheduler if the
+callback isn't to be called. It also has the (unconfirmed) potential of being implementable on GPUs
+which don't currently support exceptions.
+
 # It sounds like you just want faster exception handling. Why isn't this just a QoI issue?
 
-It has been 30 years since C++98 was finalized. Compilers seem to actively avoid optimizing
-for speed in codepaths that involve throwing, which is usually a good choice. Even in trivial cases,
-they aren't able to work their usual magic. Here is an example function that should be reduced to a
-constant value of `0`, but instead goes through the full `throw`/`catch` process on all 3 major
-compilers. On my Linux desktop that means it takes 5600 cycles, when it should take none.
+It has been 30 years since C++98 was finalized. Compilers seem to actively avoid optimizing for
+speed in codepaths that involve throwing, which is usually a good choice. But this means that even
+in trivial cases, they aren't able to work their usual magic. Here is an example function that
+should be reduced to a constant value of `0`, but instead goes through the full `throw`/`catch`
+process on all 3 major compilers. On my Linux desktop that means it takes 5600 cycles, when it
+should take none.
 
 ```cpp
 int shouldBeTrivial() {
@@ -215,7 +247,8 @@ int shouldBeTrivial() {
 ```
 
 Given how universal the poor handling of exceptions is, I don't see much hope for improvement to the
-extent proposed here in the realistic, non-trivial cases.
+extent proposed here in the realistic, non-trivial cases. Additionally, I think the ergonomics are
+better if you make the exception object directly available than requiring the `try`/`catch` blocks.
 
 # Related Future Work
 
@@ -238,5 +271,11 @@ T* dynamic_dynamic_cast(void* ptr);
 
 Currently `any` only supports exact-match casting. Using a similarly enhanced `type_info` it should
 be able to support more flexible extractions.
+
+## Less copies in `std::make_exception_ptr(E e)`
+
+I noticed that the current definition takes the exception by value and is defined as copying it.
+Should it take it by forwarding reference and forward it? If consensus is yes, I'd be happy to
+either submit a new paper or just add that to the proposed wording here.
 
 <!-- vim: set ft=markdown.gfm tw=100 : -->
