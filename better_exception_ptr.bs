@@ -19,7 +19,9 @@ Abstract: Adding facilities to inspect and handle std::exception_ptr without thr
 
 `std::exception_ptr` is a weird beast. Unlike the other `_ptr` types it is completely type erased,
 similar to a hypothetical `std::any_ptr`. Presumably because of this, it is the only `_ptr` type to
-offer no `get()` method, since it wouldn't know what type to return.
+offer no `get()` method, since it wouldn't know what type to return. You might even say it should
+take [[N4282]]'s tile as "the world's dumbest smart pointer" since the only way to dereference it is
+by throwing!
 
 This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
 exception in a type-safe manner. On standard libraries that implement `std::make_exception_ptr` by
@@ -31,9 +33,11 @@ libraries that choose to use exceptions and those that do not.
 I have a proof of implementability without ABI breakage
 [here](https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.h). It
 is an implementation of the proposed methods for both MSVC and libstdc++. On Linux, it is **385**
-times faster than using `std::rethrow_exception` and `catch` as is needed today. I haven't tested on
-libc++ or with the special ARM EH ABI, but based on my reading of those implementations, the same
-strategy should work fine. Pull requests welcome!
+times faster than using `std::rethrow_exception` and `catch` as is needed today. On Windows, it is
+*only* 10 times faster due to needing to trap into the kernel to call
+<a href="https://msdn.microsoft.com/en-us/library/bb432242(v=vs.85).aspx"><dfn>DecodePointer()</dfn></a>.
+I haven't tested on libc++ or with the special ARM EH ABI, but based on my reading of those
+implementations, the same strategy should work fine. Pull requests welcome!
 
 # Proposal
 
@@ -158,7 +162,7 @@ described by [=type()=], so you will need to cast it to something compatible in 
 
 ## Lippincott Functions
  
-Here is a lightly-modified example from our code base that shows a **100x** speedup:
+Here is a lightly-modified example from our code base that shows a **100x** speedup on Linux:
 
 <table>
   <thead>
@@ -201,6 +205,11 @@ Status exceptionToStatus() noexcept {
     <td> <center> 1892ns
     <td> <center> 18ns
 </table>
+
+Windows shows *only* a 2x speedup (1488ns -> 1744ns) due to the [=DecodePointer()=] issue mentioned
+above (160ns), as well as `std::current_exeption()` being even slower (575ns). Essentially all of
+the runtime is in those two functions. (Windows tests were conducted on different hardware, so the
+results cannot be directly compared to Linux)
 
 ## Terminate Handlers
 
