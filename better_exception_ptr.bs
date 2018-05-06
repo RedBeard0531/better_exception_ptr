@@ -25,10 +25,11 @@ is by throwing!
 
 This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
 exception in a type-safe manner. On standard libraries that implement `std::make_exception_ptr` by
-direct construction rather than `try`/`catch`/`current_exeption()` (currently MS-STL and libstdc++,
-but not libc++), it should now be possible to both create and consume a `std::exception_ptr` with
-full fidelity even with exceptions disabled. This should ease interoperability between codebases and
-libraries that choose to use exceptions and those that do not. 
+direct construction rather than using `try`/`catch`/`current_exeption()` (currently MS-STL and
+libstdc++, but not libc++), it should now be possible to both create and consume a
+`std::exception_ptr` with full fidelity even with exceptions disabled. This should ease
+interoperability between codebases and libraries that choose to use exceptions and those that do
+not.
 
 I have a proof of implementability without ABI breakage
 [here](https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.h). It
@@ -60,22 +61,24 @@ bool handle() const { return false; }
 
 Handles the contained exception as if there were a sequence of `catch` blocks that catch the
 argument type of each handler. The argument type is determined in a similar way to the
-`function(Handler)::argument` template deduction guide to support detecting the first and only
-argument type of a Callable object, but that allows an `R(...)` callable as the natural analog of
-the `catch(...)` catch-all. If present, the catch-all must be the last handler.
+`function(Handler)::argument` [template deduction
+guide](http://en.cppreference.com/w/cpp/utility/functional/function/deduction_guides) to detect the
+first and only argument type of a Callable object. However, it must also detect an `R(...)` callable
+as the natural analog of the `catch(...)` catch-all. If present, the catch-all must be the last
+handler.
 
 The return type of `handle()` is the natural meaning of combining the return types from all handers
 and making it optional to express nothing being caught. More formally:
 ```cpp
 using CommonReturnType = common_type_t<result_of_t<Handlers>...>;
-using ReturnType = conditional_t<is_void_v<CommonReturnType>, 
+using ReturnType = conditional_t<is_void_v<CommonReturnType>,
                                  bool,
                                  optional<CommonReturnType>>;
 ```
 
-If none of the handlers match the contained exception type, returns either `false` or an empty
-`optional`. If any handler matches, returns either `true` or an `optional` constructed from its
-return value.
+If none of the handlers match the contained exception type, the call to `handle()` returns either
+`false` or an empty `optional`. If any handler matches, it returns either `true` or an `optional`
+constructed from the handler's return value.
 
 This API is inspired by
 [folly::exception_wrapper](https://github.com/facebook/folly/blob/0a5110143325a4db5a0a7de98531a46064731fb7/folly/ExceptionWrapper.h#L569-L606).
@@ -105,9 +108,9 @@ If the contained exception is catchable by a `catch(T)` block, returns either a 
 exception if `T` is a reference or an `optional` containing the caught pointer if `T` is a pointer.
 If the `catch(T)` block would not catch the exception, returns `nullopt`/`nullptr`.
 
-The pointer case is a bit odd, and throwing/catching pointer is fairly rare so it could use some
-explanation for why it it both different and the same as the reference case. They have different
-return types because returning `T*` is impossible because the exception holds a `U*` and `T` may be
+The pointer case is a bit odd and throwing/catching pointer is fairly rare so it could use some
+explanation for why it is both different and the same as the reference case. They have different
+return types because returning `T*` is impossible since the exception holds a `U*` and `T` may be
 `X*`, and there is no `X*` object to return a pointer to. Returning `T`/`X*` in this case would also
 be incorrect because there would be no way to distinguish a thrown null pointer from a type
 mismatch. Luckily, `optional<T>` has the same access API as `T*` so even though the return types of
@@ -124,7 +127,7 @@ if (auto ex = ex_ptr.try_catch<CatchT>()) {
 [[noreturn]] void terminate_with_active() const noexcept;
 ```
 
-Equivalent to: 
+Equivalent to:
 
 ```cpp
 try {
@@ -159,13 +162,14 @@ void* get_raw_ptr() const;
 ```
 
 Returns the address of the exception held by this `exception_ptr`. It is a pointer to the type
-described by [=type()=], so you will need to cast it to something compatible in order to use this.
+described by [=type()=], so the caller will need to cast it to something compatible in order to use
+this.
 
 
 # Use Cases
 
 ## Lippincott Functions
- 
+
 Here is a lightly-modified example from our code base that shows a **100x** speedup on Linux:
 
 <table>
@@ -213,14 +217,14 @@ Status exceptionToStatus() noexcept {
 Windows shows *only* a 2x speedup (1488ns -> 1744ns) due to the [=DecodePointer()=] issue mentioned
 above (160ns), as well as `std::current_exeption()` being even slower (575ns). Essentially all of
 the runtime is in those two functions. (Windows tests were conducted on different hardware, so the
-results cannot be directly compared to Linux)
+results cannot be directly compared to Linux.)
 
 ## Terminate Handlers
 
 It is common practice to use terminate handlers to provide useful debugging information about the
 failure. libstdc++ has a default handler that prints the type of the thrown exception using it's
-privileged access to the EH internals. Unfortunately there is no way to do that in the general case
-if you supply your own terminate handler. [=type()=] makes that information available from
+privileged access to the EH internals. Unfortunately, there is no way to do that in the general case
+in a user-defined terminate handler. [=type()=] makes that information available from
 `current_exception` in a portable way.
 
 ## `std::expected` and Similar Types
@@ -261,7 +265,7 @@ int shouldBeTrivial() {
 
 Given how universal the poor handling of exceptions is, I don't see much hope for improvement to the
 extent proposed here in the realistic, non-trivial cases. Additionally, I think the ergonomics are
-better if you make the exception object directly available than requiring the `try`/`catch` blocks.
+better if the exception object is made directly available than requiring the `try`/`catch` blocks.
 
 # Related Future Work
 
@@ -288,7 +292,7 @@ be able to support more flexible extractions.
 ## Less copies in `std::make_exception_ptr(E e)`
 
 I noticed that the current definition takes the exception by value and is defined as copying it.
-Should it take it by forwarding reference and forward it? If consensus is yes, I'd be happy to
-either submit a new paper or just add that to the proposed wording here.
+Should it take the exception object by forwarding reference and forward it? If consensus is yes, I'd
+be happy to either submit a new paper or just add that to the proposed wording here.
 
 <!-- vim: set ft=markdown.gfm tw=100 : -->
