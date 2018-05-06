@@ -1,7 +1,8 @@
+#undef _DEBUG // Make it easier to link to benchmark on windows with debugging enabled.
+
 #include <benchmark/benchmark.h>
 #include <exception>
 #include <cstring>
-#include <cxxabi.h>
 #include <cassert>
 #include <functional>
 
@@ -76,11 +77,12 @@ static void BM_today_Lippincott(benchmark::State& state) {
 }
 BENCHMARK(BM_today_Lippincott);
 
+
 static void BM_EP_Lippincott(benchmark::State& state) {
     try {
         throw Baz();
     } catch (...) {
-        for (auto _ : state){
+        for (auto _ : state) {
             stdx::current_exception().handle_or_terminate(
                 [&](Baz& ex) {
                     benchmark::DoNotOptimize(ex.i);
@@ -90,5 +92,30 @@ static void BM_EP_Lippincott(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_EP_Lippincott);
+
+// These last few things explain perf on windows. Most of the time goes to these calls.
+
+static void BM_current_exception(benchmark::State& state) {
+    try {
+        throw Baz();
+    }
+    catch (...) {
+        for (auto _ : state) {
+            benchmark::DoNotOptimize(std::current_exception());
+        }
+    }
+}
+BENCHMARK(BM_current_exception);
+
+#ifdef _WIN32
+static void BM_DecodePointer(benchmark::State& state) {
+    auto x = int();
+    auto p = EncodePointer(&x);
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(DecodePointer(p));
+    }
+}
+BENCHMARK(BM_DecodePointer);
+#endif
 
 BENCHMARK_MAIN();

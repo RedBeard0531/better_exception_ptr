@@ -62,10 +62,10 @@ public:
     std::conditional_t<std::is_void_v<CommonType>, bool, std::optional<CommonType>>
     handle(Handler&& handler, Rest&&... rest) {
         using Argument = detail::ArgumentOf<std::decay_t<Handler>>;
-        static_assert(!std::is_same<Argument, detail::catch_all_tag>()); // TODO
+        constexpr bool is_catch_all = std::is_same<Argument, detail::catch_all_tag>();
+        static_assert(!is_catch_all || sizeof...(Rest) == 0, "handler for (...) must be last");
 
-        if constexpr(std::is_same<Argument, detail::catch_all_tag>()) {
-            static_assert(sizeof...(Rest) == 0, "handler for (...) must be last");
+        if constexpr(is_catch_all) {
             if constexpr(std::is_void_v<CommonType>) {
                 handler();
                 return true;
@@ -96,8 +96,10 @@ public:
     std::common_type_t<detail::ReturnOf<Handler>, detail::ReturnOf<Rest>...>
     handle_or_terminate(Handler&& handler, Rest&&... rest) {
         using Argument = detail::ArgumentOf<std::decay_t<Handler>>;
-        if constexpr(std::is_same<Argument, detail::catch_all_tag>()) {
-            static_assert(sizeof...(Rest) == 0, "handler for (...) must be last");
+        constexpr bool is_catch_all = std::is_same<Argument, detail::catch_all_tag>();
+        static_assert(!is_catch_all || sizeof...(Rest) == 0, "handler for (...) must be last");
+
+        if constexpr(is_catch_all) {
             return handler();
         }else if (auto caught = try_catch<Argument>()) {
             return handler(*caught);

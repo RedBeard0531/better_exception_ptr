@@ -1,9 +1,9 @@
-// This was cobbled together from various sources on the internet along with some trial and error.
-// TODO: try to attribute where apropriate.
+// Most of this is from http://workblog.pilin.name/2014/03/decoding-parameters-of-thrown-c.html
+// The PMD structure and decoding logc is from http://www.openrce.org/articles/full_view/23
+
 // I'm wrapping in my namespace to avoid unnecessary namespace pollution.
 
-
-namespace 
+namespace stdx::detail {
 
 #define _EH_PTR64
 
@@ -30,7 +30,7 @@ void* adjustThis(const PMD& pmd, void* pThisRaw) {
 }
 
 
-using PMFN = void(*)();
+using PMFN = __int32;
 
 typedef struct TypeDescriptor
 {
@@ -98,3 +98,5 @@ typedef struct EHExceptionRecord {
 #endif
 	} params;
 } EHExceptionRecord;
+
+}

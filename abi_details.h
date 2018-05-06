@@ -3,7 +3,9 @@
 #include <optional>
 #include <typeinfo>
 
-#if defined(_WINDOWS)
+#if defined(_WIN32)
+
+#include <Windows.h>
 
 #include "third_party/MSVC/eh_details.h"
 #include <memory>
@@ -55,11 +57,6 @@ std::optional<void*> try_catch(const std::exception_ptr& e_ptr, const std::type_
     }
     // No Match :(
     return {};
-    auto out = get_raw_ptr(e_ptr);
-    // TODO pointer case.
-    if (target_type->__do_catch(type(e_ptr), &out, 1))
-        return out;
-    return std::nullopt;
 }
 
 }
