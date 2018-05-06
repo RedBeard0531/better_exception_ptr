@@ -137,6 +137,10 @@ try {
 Invokes the terminate handler with the contained exception active to allow it to provide useful
 information for debugging.
 
+Note: I believe this definition is exactly equivalent to just calling `rethrow_exception` inside a
+`noexcept` context, but I wrote it that way to avoid bugs we've seen with `noexcept`, particularly
+when used for this purpose.
+
 ## Low-level API
 
 This is the low-level API that is intended for library authors building their own high-level API,
