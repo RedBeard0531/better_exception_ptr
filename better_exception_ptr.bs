@@ -20,8 +20,8 @@ Abstract: Adding facilities to inspect and handle std::exception_ptr without thr
 `std::exception_ptr` is a weird beast. Unlike the other `_ptr` types it is completely type erased,
 similar to a hypothetical `std::any_ptr`. Presumably because of this, it is the only `_ptr` type to
 offer no `get()` method, since it wouldn't know what type to return. You might even say it should
-take [[N4282]]'s tile as "the world's dumbest smart pointer" since the only way to dereference it is
-by throwing!
+take [[N4282]]'s tile as *"The World's Dumbest Smart Pointer"* since the only way to dereference it
+is by throwing!
 
 This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
 exception in a type-safe manner. On standard libraries that implement `std::make_exception_ptr` by
