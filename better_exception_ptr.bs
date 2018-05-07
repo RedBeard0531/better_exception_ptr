@@ -54,7 +54,7 @@ Calling any of these methods on a null `exception_ptr` is UB.
 
 ### <dfn>handle()<dfn>
 ```cpp
-template <typename Handlers>
+template <typename... Handlers>
 /*see below*/ handle(Handlers&&... handlers) const;
 bool handle() const { return false; }
 ```
@@ -87,7 +87,7 @@ I think the valid lifetimes of the references would be shorter than is proposed 
 
 ### <dfn>handle_or_terminate()<dfn>
 ```cpp
-template <typename Handlers>
+template <typename... Handlers>
 common_type_t<result_of_t<Handlers>...>
 handle_or_terminate(Handlers&&... handlers) const;
 ```
@@ -272,6 +272,9 @@ extent proposed here in the realistic, non-trivial cases. Additionally, I think 
 better if the exception object is made directly available than requiring the `try`/`catch` blocks.
 
 # Related Future Work
+
+These are related ideas that are **not** part of this proposal. If this proposal is well received,
+I'd like a straw poll of these to gauge the interest for future proposals.
 
 ## Support dynamic `dynamic_cast` using `type_info`
 
