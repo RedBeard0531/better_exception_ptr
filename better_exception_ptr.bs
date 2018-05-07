@@ -25,8 +25,8 @@ is by throwing!
 
 This proposal suggests adding methods to `std::exception_ptr` to directly access the pointed-to
 exception in a type-safe manner. On standard libraries that implement `std::make_exception_ptr` by
-direct construction rather than using `try`/`catch`/`current_exeption()` (currently MS-STL and
-libstdc++, but not libc++), it should now be possible to both create and consume a
+direct construction rather than using `try`/`throw`/`catch`/`current_exeption()` (currently MS-STL
+and libstdc++, but not libc++), it should now be possible to both create and consume a
 `std::exception_ptr` with full fidelity even with exceptions disabled. This should ease
 interoperability between codebases and libraries that choose to use exceptions and those that do
 not.
@@ -227,6 +227,10 @@ privileged access to the EH internals. Unfortunately, there is no way to do that
 in a user-defined terminate handler. [=type()=] makes that information available from
 `current_exception` in a portable way.
 
+As a historical sidenote, that message from the terminate handler is what initially got me looking
+into the ABI for exception handling to figure out how that was done. If whoever wrote that code is
+reading this, thanks!
+
 ## `std::expected` and Similar Types
 
 These types become more useful with the ability to interact with the exception directly without
@@ -272,9 +276,9 @@ better if the exception object is made directly available than requiring the `tr
 ## Support dynamic `dynamic_cast` using `type_info`
 
 My initial implementation plan called for adding casting facilities to `type_info` and building the
-catch logic on top of that. Since it ended up being the wrong route for MSVC ABI, I abandoned that
-plan, but it still provides useful independent functionality. Something like adding the following
-methods on `type_info`:
+[=try_catch()=] logic on top of that. Since it ended up being the wrong route for the MSVC ABI, I
+abandoned that plan, but it still provides useful independent functionality. Something like adding
+the following methods on `type_info`:
 
 ```cpp
 template <typename T>
