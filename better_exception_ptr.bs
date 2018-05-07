@@ -2,9 +2,9 @@
 Title: How to catch an exception_ptr without even try-ing
 Shortname: P1066
 URL: wg21.link/P1066
-Revision: 0-PRE
+Revision: 0
 Audience: EWG,LEWG
-Status: D
+Status: P
 Group: WG21
 !Latest Version: <a href="https://api.csswg.org/bikeshed/?url=https://raw.githubusercontent.com/RedBeard0531/better_exception_ptr/master/better_exception_ptr.bs&force=1">Click here</a>
 !Source: <a href="https://github.com/RedBeard0531/better_exception_ptr/blob/master/better_exception_ptr.bs">No real reason to click here</a>
